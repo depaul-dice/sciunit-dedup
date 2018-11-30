@@ -34,3 +34,7 @@ tests/run.exe
 /*.sln
 /*.suo
 /*.sdf
+.vs/vvpkg/v15/Browse.VC.db
+*.ipch
+.vs/VSWorkspaceState.json
+.vs/config/applicationhost.config

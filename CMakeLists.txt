@@ -6,6 +6,10 @@ include(CTest)
 
 option(USE_SYSTEM_SQLITE3 "Use system libsqlite3" OFF)
 
+
+
+
+
 if(NOT MSVC)
 	set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 	    ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -46,8 +50,14 @@ include_directories(include)
 file(GLOB vvpkg_srcs src/*.cc)
 file(GLOB tests_srcs tests/*.cc)
 file(GLOB sqxx_srcs 3rdparty/src/sqxx/*.cpp)
+#file(GLOB lip_srcs lipSubModule/lip-master/src/*cc)
 
 add_library(vvpkg ${vvpkg_srcs})
+#add_library(lip ${lip_srcs})
+
+
+add_subdirectory(include/lipSubModule/lip-master)
+target_link_libraries(vvpkg lip)
 
 if(USE_SYSTEM_SQLITE3)
 	add_library(sqxx ${sqxx_srcs})
