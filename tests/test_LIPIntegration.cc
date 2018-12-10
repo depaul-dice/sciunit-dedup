@@ -15,7 +15,7 @@
 #include <stdint.h>
 #include <vvpkg/vvpkg.h>
 #include <vvpkg/vfile.h>
-
+#include <iostream>
 
 
 //using namespace stdex::literals;
@@ -59,6 +59,8 @@ void PrintCurrentPath()
 // This tests the ability to create files with textOnly objects with no
 // directories and no symlinks included to verify this it will also include an
 // unpack and a compare to origonal sourceMaterial
+
+//TODO:: make subcase of test to diff this with the Lip in VVPKG
 TEST_CASE("lipCreate,TextFilesOnly,NoSubDIR,NoSymlink")
 {
 	PrintCurrentPath();
@@ -204,17 +206,33 @@ TEST_CASE("insertLIP")
 
 	printf("Succees on checkincheckout\n\n");
 
-
 	std::remove(testDataLIP1Checkout);
 
 }
 
-
 class filechunk
 {
 public:
+
 	uint64_t offset;
 	uint64_t size;
+
+	filechunk()
+	{
+		offset = 0;
+		size = 0;
+	}
+
+	~filechunk(){}
+
+	filechunk& operator =(const filechunk& rhs)
+	{
+		this->offset = rhs.offset;
+		this->size = rhs.size;
+		return *this;
+	}
+
+	filechunk(const filechunk& rhs) : offset(rhs.offset), size(rhs.size){}
 
 	filechunk(std::pair<uint64_t, uint64_t>& pair)
 	{
@@ -254,8 +272,6 @@ TEST_CASE("extract from vfile")
 	File::Handle fh;
 	File::Handle outFh;
 
-	
-
 	REQUIRE(File::Open(fh, "./vvpkg.bin", File::Mode::READ)==File::SUCCESS);
 	REQUIRE(File::Open(outFh, "./LipvFileOut.lip", File::Mode::WRITE)==File::SUCCESS);
 
@@ -269,14 +285,13 @@ TEST_CASE("extract from vfile")
 		File::Write(outFh, buff, c.size);
 
 		delete buff;
-		
 	}
 
 	File::Close(fh);
 	File::Close(outFh);
-
-
+	
 	{
+		REQUIRE(fileExists(testDataLIP1Output));
 		LIP lip1Control(testDataLIP1Output);
 		LIP lip1FromvFile("./LipvFileOut.lip");
 
@@ -287,53 +302,175 @@ TEST_CASE("extract from vfile")
 
 }
 
-//TODO: FILE* isn't the right spot for me to extend to be at I think I need to do either an indirectbuf or stream buff
-//this is working because the chunks are signular I need to override the underflow operator I think, still more research to do on how to make 
-//an ideal stream wrapper for vvpkg, I wanna try overloading the stream operators and see what that gets me.
-//https://www.slac.stanford.edu/comp/unix/gnu-info/iostream_5.html#SEC26 resource to follow up on
-struct vvHandle : public FILE //public indrectbuf //public streambuf
+////this still may be a viable option but it would completely shift the paradiam that has been used so far for dealing with files and it would'nt match what vvpkg does so i'm leaving this here as a starter point in case someone else decides to pick up the torch
+//class handleOverrideTest : public streambuf
+//{
+//	FILE* handle;
+//public:
+//	handleOverrideTest(const char* filePath)
+//	{
+//		File::Open(handle, filePath, File::Mode::READ);
+//	}
+//	handleOverrideTest();
+//	~handleOverrideTest(){File::Close(handle);}
+//	handleOverrideTest& operator = (const handleOverrideTest& rhs) = default;
+//	handleOverrideTest(const handleOverrideTest& rhs) = default;
+//	int underflow() override{}
+//};
+
+//class dedupedFileInfo
+//{
+//public:
+//	std::list<filechunk> chunkList;
+//	uint64_t chunkCount;
+//	uint64_t fileSize;
+//
+//	dedupedFileInfo() = delete;
+//
+//	dedupedFileInfo(std::list<filechunk> _chunkList)
+//	{
+//		chunkList = _chunkList;
+//	}
+//	~dedupedFileInfo()	{}
+//};
+
+//ReadOnly FileHandle into deduplicated chunks, chunks cannot be edited once in VVPKG
+class dedupedFileHandle : public readOnlyFileHandle
 {
-
+	//file info
 	std::list<filechunk> chunkList;
-	uint64_t readCursor;
-	File::Handle vvbin;
+	uint64_t chunkCount;
+	uint64_t fileSize;
 
-	vvHandle(std::list<filechunk> cL)
+	//stream info
+	uint64_t logicalReadCursor;
+	//uint64_t currentChunkNumber;
+	uint64_t currentChunkOffset;
+
+private:
+
+	//this is an ineffecient way to handle this but I am just going for functionality. I need to setup a system to remember which chunk I'm currently in and page back and forth
+	filechunk findChunk(uint64_t offset)
 	{
-		chunkList = cL;
-		File::Open(vvbin, "./vvpkg.bin", File::READ);
+		uint64_t cumlativeOffset = 0;
+
+		for (filechunk t : chunkList)
+		{
+			if (cumlativeOffset + t.size > offset)
+			{
+				currentChunkOffset = offset - cumlativeOffset;
+				return t;
+			}
+			else
+			{
+				cumlativeOffset += t.size;
+			}
+		}
+		//if chunk doesn't exist offset is outside file range
+		return filechunk();
 	}
 
-	vvHandle(const vvHandle&) = delete;
-	vvHandle operator = (const vvHandle&) = delete;
+public:
 
-	vvHandle(const vvHandle&& other)
+	dedupedFileHandle(std::list<filechunk> cL) : chunkList(cL), logicalReadCursor(0), currentChunkOffset(0), chunkCount(0), fileSize(0)
 	{
-		this->chunkList = other.chunkList;
-		this->vvbin = other.vvbin;
+		//if the file doesn't open nothing else will work;
+		assert(File::SUCCESS == File::Open(handle, "./vvpkg.bin", File::READ));
+		
+		for (filechunk c : cL)
+		{
+			fileSize += c.size;
+			chunkCount++;
+		}
 	}
 
-	vvHandle& operator = (const vvHandle&& other)
+	void Close() override
 	{
-		this->chunkList = other.chunkList;
-		this->vvbin = other.vvbin;
-
-		return *this;
+		File::Close(handle);
 	}
 
-	~vvHandle()
+	int64_t Read(void* const _buffer, const int64_t _size) override
 	{
-		File::Close(vvbin);
+		char* fillCursor = (char*)_buffer;//where the next byte will be entered;
+		int64_t sizeRemaining = _size;//how many bytes still need to be read into the buffer
+		int64_t readbytes; //number of bytes read successfully
+
+		filechunk chunk;
+
+		while (sizeRemaining != 0)
+		{
+			
+			chunk = findChunk(logicalReadCursor);
+
+			//check for EOF
+			if (chunk.size == 0)
+			{
+				return readbytes;
+			}
+
+			if (chunk.size >= currentChunkOffset + sizeRemaining)
+			{//one whole read from chunk all at once 
+				File::Seek(handle, File::BEGIN, chunk.offset + currentChunkOffset);
+				File::Read(handle, fillCursor, sizeRemaining);
+				logicalReadCursor += sizeRemaining;
+				currentChunkOffset += sizeRemaining;
+				sizeRemaining = 0;
+			}
+			else //chunk size is less than the buffer to be filled fill what we can and increment
+			{// read from the chunk and increase the logical cursor and the fillCursor and refind chunk;
+
+				int64_t sizeToRead = chunk.size - currentChunkOffset;
+
+				File::Seek(handle, File::BEGIN, chunk.offset + currentChunkOffset);
+				File::Read(handle, fillCursor, sizeToRead);
+				
+				logicalReadCursor += sizeToRead;
+				currentChunkOffset += sizeToRead;
+				sizeRemaining -= sizeToRead;
+				fillCursor += sizeToRead;
+
+			}
+		}
+	}
+
+	//I'm gonna start with seek from beginning only add from current and from end later
+	//void Seek(int64_t offset)
+	//{
+	//	//convert the logical file offset to the physical deduplicated chunk + offset into that chunk
+	//	logicalReadCursor = offset;
+	//	findChunk(logicalReadCursor);
+	//}
+
+	void Seek(int64_t offset, File::Location fileLocation = File::Location::BEGIN) override
+	{
+		if (fileLocation == File::Location::BEGIN)
+		{
+			logicalReadCursor = offset;
+		}
+		else if (fileLocation == File::Location::CURRENT)
+		{
+			logicalReadCursor += offset;
+		}
+		else
+		{//I'm assuming since how it's used in the standard c functions is you pass a negatve offset to rewind;
+			logicalReadCursor = fileSize + offset;
+		}
+		findChunk(logicalReadCursor);
+	}
+
+	int64_t Tell() override
+	{
+		//return the current logical file offset
+		return logicalReadCursor;
 	}
 
 };
 
-vvHandle getHandleFromVVPKG()
+dedupedFileHandle* getHandleFromVVPKG(const char* fileName)
 {
-
 	vvpkg::vfile t(".");
 
-	auto pairs = t.list("lip1");
+	auto pairs = t.list(fileName);
 
 	std::pair<uint64_t, uint64_t> list = pairs();
 
@@ -355,51 +492,95 @@ vvHandle getHandleFromVVPKG()
 
 	printf("vfile id = %s\n", t.id().to_string().c_str());
 
-	return vvHandle(chunkList);
+	return new dedupedFileHandle(chunkList);
+}
+
+//this is to test the deduped handle approach
+TEST_CASE("dedupedFileHandleTest")
+{
+
+	dedupedFileHandle* t(getHandleFromVVPKG("lip1"));
+
+	REQUIRE(t->Tell() == 0);
+
+	char magic[4];
+
+	t->Read(magic, 4);
+
+	assert(magic[0] == 'L');
+	assert(magic[1] == 'I');
+	assert(magic[2] == 'P');
+	assert(magic[3] == 0);
+
+	REQUIRE(t->Tell() == 4);
+
+	t->Seek(0);
+
+	REQUIRE(t->Tell() == 0);
+
+	REQUIRE(fileExists(testDataLIP1Output));
+
+	LIP ControlLIP1(testDataLIP1Output);
+
+	LIP vvLIPTest(t);
+
+	REQUIRE(ControlLIP1.diff(vvLIPTest));
+
+
+	printf("control diff version in vvpkg is perfect match!");
+}
+
+//this is to test the stream wrapper approach
+TEST_CASE("deduped multiblock handle test")
+{
+
+	//this is just to test to make sure the stream underflow works on a normal file
+	//handleOverrideTest t(testDataLIP1Output);
+
+
+
+
+
+
+}
+
+
+TEST_CASE("create lip from VVPKGHandle")
+{
+
+
+
+
+
+
 
 }
 
 TEST_CASE("lipStreamWrapper")
 {
-
 	//auto repo = vvpkg::repository(".", "r+");
 	//vvpkg::managed_bundle<vvpkg::rabin_boundary> bs(10 * 1024 * 1024);
 
-	vvHandle vHandle = getHandleFromVVPKG();
+	//dedupedFileHandle vHandle = getHandleFromVVPKG("lip1");
 	//vHandle.read();
 	
-	File::Handle outFh;
+	//File::Handle outFh;
 
 	//REQUIRE(File::Open(vHandle, "./vvpkg.bin", File::Mode::READ) == File::SUCCESS);
-	REQUIRE(File::Open(outFh, "./LipvFileOut2.lip", File::Mode::WRITE) == File::SUCCESS);
+	//REQUIRE(File::Open(outFh, "./LipvFileOut.lip", File::Mode::WRITE) == File::SUCCESS);
 
 	
-	for (filechunk c : vHandle.chunkList)
-	{
-		File::Seek(vHandle.vvbin, File::Location::BEGIN, c.offset);
-
-		char* buff = new char[c.size];
-
-		File::Read(vHandle.vvbin, buff, c.size);
-		File::Write(outFh, buff, c.size);
-
-		delete buff;
-
-	}
 
 	//File::Close(fh);
-	File::Close(outFh);
+	//File::Close(outFh);
 
-	{
-		LIP lip1Control(testDataLIP1Output);
-		LIP lip1FromvFile("./LipvFileOut2.lip");
+	//{
+	//	LIP lip1Control(testDataLIP1Output);
+	//	LIP lip1FromvFile("./LipvFileOut.lip");
 
-		lip1Control.diff(lip1FromvFile);
-	}
+	//	lip1Control.diff(lip1FromvFile);
+	//}
 
-	std::remove("./LipvFileOut2.lip");
-
-	
-
+	//std::remove("./LipvFileOut.lip");
 	
 }
