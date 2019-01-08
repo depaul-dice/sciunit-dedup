@@ -17,7 +17,6 @@
 #include <vvpkg/vfile.h>
 #include <iostream>
 
-
 //using namespace stdex::literals;
 //using stdex::hashlib::hexlify;
 using namespace std;
@@ -63,6 +62,7 @@ void PrintCurrentPath()
 //TODO:: make subcase of test to diff this with the Lip in VVPKG
 TEST_CASE("lipCreate,TextFilesOnly,NoSubDIR,NoSymlink")
 {
+	//just so you can see where the files are on the machine if you wanted to verify them manually
 	PrintCurrentPath();
 	//verifying test files
 
@@ -78,6 +78,8 @@ TEST_CASE("lipCreate,TextFilesOnly,NoSubDIR,NoSymlink")
 
 	REQUIRE(fileHandle != nullptr);
 
+	//this is a somewhat arcane line that uses the existing lip archiver from Z, I don't know why he uses mutable labdas instead of just calling the file function and passing the handle. 
+	//I would redo this if i had the time but there's too many things depending on it currently
 	lip::archive(vvpkg::to_c_file(fileHandle), testDataLIP1Root);
 
 	fclose(fileHandle);
@@ -335,6 +337,8 @@ TEST_CASE("extract from vfile")
 //};
 
 //ReadOnly FileHandle into deduplicated chunks, chunks cannot be edited once in VVPKG
+//Note this is here in the test cases beacuse this still needs testing with larger LIP's to make sure all the operations work properly across chunks. 
+//I didn't get a chance to generate data to cover edge cases
 class dedupedFileHandle : public readOnlyFileHandle
 {
 	//file info
@@ -393,7 +397,7 @@ public:
 	{
 		char* fillCursor = (char*)_buffer;//where the next byte will be entered;
 		int64_t sizeRemaining = _size;//how many bytes still need to be read into the buffer
-		int64_t readbytes; //number of bytes read successfully
+		int64_t readbytes = 0; //number of bytes read successfully
 
 		filechunk chunk;
 
@@ -433,6 +437,36 @@ public:
 		}
 	}
 
+	//NOTE:: the fgets function appends a null terminator and breaks on newline this doesn't exactly work that way this only really works for our use case because I just need the file names from vvpkg there's not multiple lines to read.
+	void ReadLine(char* const buffer, const int maxSize) override
+	{
+		bool EOLFound = false;
+		int sizeRemaining = maxSize;
+		char* buffCursor = buffer;
+
+		filechunk chunk = findChunk(logicalReadCursor);
+
+		while (sizeRemaining != 0 && !EOLFound)
+		{
+			//TODO:: optimze this above I only find the chunk and then read as much of it as possibble/necessary,
+			//with this I am only reading one byte at a time so it's not ideal i should only refind chunk after I know I need too i.e i am out of bytes on this chunk. but for now this works
+			chunk = findChunk(logicalReadCursor);
+
+			File::Seek(handle, File::BEGIN, chunk.offset + currentChunkOffset);
+			File::Read(handle, buffCursor, 1);
+			
+			if (*buffCursor == '\0')
+			{
+				EOLFound = true;
+			}
+
+			logicalReadCursor++;
+			//currentChunkOffset++;
+			buffCursor++;
+			sizeRemaining--;
+		}
+	}
+
 	//I'm gonna start with seek from beginning only add from current and from end later
 	//void Seek(int64_t offset)
 	//{
@@ -462,6 +496,11 @@ public:
 	{
 		//return the current logical file offset
 		return logicalReadCursor;
+	}
+
+	int64_t FileSize()
+	{
+		return fileSize;
 	}
 
 };
@@ -526,7 +565,6 @@ TEST_CASE("dedupedFileHandleTest")
 
 	REQUIRE(ControlLIP1.diff(vvLIPTest));
 
-
 	printf("control diff version in vvpkg is perfect match!");
 }
 
@@ -539,18 +577,11 @@ TEST_CASE("deduped multiblock handle test")
 
 
 
-
-
-
 }
 
 
 TEST_CASE("create lip from VVPKGHandle")
 {
-
-
-
-
 
 
 
@@ -568,8 +599,6 @@ TEST_CASE("lipStreamWrapper")
 
 	//REQUIRE(File::Open(vHandle, "./vvpkg.bin", File::Mode::READ) == File::SUCCESS);
 	//REQUIRE(File::Open(outFh, "./LipvFileOut.lip", File::Mode::WRITE) == File::SUCCESS);
-
-	
 
 	//File::Close(fh);
 	//File::Close(outFh);

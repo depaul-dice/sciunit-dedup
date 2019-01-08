@@ -37,7 +37,7 @@ struct rabin_polynomial
 	{
 		return ((p << 8) | m) ^ T[p >> shift];
 	}
-
+	
 private:
 	void calculate_lookup_table();
 
