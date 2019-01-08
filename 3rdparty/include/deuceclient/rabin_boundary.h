@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+
 #ifndef RAX_RABIN__BOUNDARY_H
 #define RAX_RABIN__BOUNDARY_H
 
@@ -21,6 +22,8 @@
 
 #include <boost/assert.hpp>
 
+ //NOTE:: this is not used in vvpkg it's actually the same file name in in the vvpkg folder
+// and uses the namespace vvpkg but is also called rabin_boundry. but is a slightly modified version.
 namespace rax
 {
 
