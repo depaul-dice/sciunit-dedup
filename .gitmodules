@@ -1,0 +1,4 @@
+[submodule "include/lipSubModule"]
+	path = include/lipSubModule
+	url = https://bitbucket.org/depauldbgroup/lip
+	branch = chex
