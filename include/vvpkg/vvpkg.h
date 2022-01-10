@@ -1,6 +1,7 @@
 #include "repository.h"
 #include "rabin_boundary.h"
 #include <stdex/defer.h>
+#include <iostream>
 
 #include <vvpkg/fd_funcs.h>
 
