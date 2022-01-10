@@ -18,7 +18,8 @@ void commit(char const* rev, char const* fn)
 	}();
 	defer(vvpkg::xclose(fd));
 
-	repo.commit(rev, bs, vvpkg::from_descriptor(fd));
+	std::cerr << repo.commit(rev, bs, vvpkg::from_descriptor(fd))
+                  << std::endl;
 }
 
 void checkout(char const* rev, char const* fn)
