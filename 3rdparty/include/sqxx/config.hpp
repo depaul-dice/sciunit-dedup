@@ -3,6 +3,7 @@
 #define SQXX_CONFIG_HPP_INCLUDED
 
 #include <functional>
+#include <cstdint>
 
 struct mem_malloc;
 struct mem_methods;
